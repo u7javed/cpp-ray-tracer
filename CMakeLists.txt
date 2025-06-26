@@ -13,7 +13,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # Add executable
 add_executable(${PROJECT_NAME} src/main.cc)
 
-target_include_directories(${PROJECT_NAME} PRIVATE external)
+target_include_directories(${PROJECT_NAME} PRIVATE external src)
 
 # Set compiler flags
 if(MSVC)
