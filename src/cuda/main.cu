@@ -41,7 +41,7 @@ __global__ void render_init(int max_x, int max_y, curandState *rand_state) {
     int y = threadIdx.y + blockIdx.y * blockDim.y;
     if ((x >= max_x) || (y >= max_y)) return;
     int pixel_index = y * max_x + x;
-    curand_init(1984, pixel_index, 0, &rand_state[pixel_index]);
+    curand_init(1984 + pixel_index, 0, 0, &rand_state[pixel_index]);
 }
 
 __global__ void render(
@@ -92,16 +92,17 @@ __global__ void create_world(
             for(int b = -11; b < 11; b++) {
                 float choose_mat = RND;
                 vec3 center(a + 0.2f * RND, 0.2f, b + 0.2f * RND);
+                vec3 center2 = center + vec3(0, RND * 0.5f, 0);
                 if(choose_mat < 0.8f) {
-                    d_list[i++] = new sphere(center, 0.2,
+                    d_list[i++] = new sphere(center, center2, 0.2,
                                              new lambertian(vec3(RND * RND, RND * RND, RND * RND)));
                 }
                 else if(choose_mat < 0.95f) {
-                    d_list[i++] = new sphere(center, 0.2,
+                    d_list[i++] = new sphere(center, center2, 0.2,
                                              new metal(vec3(0.5f * (1.0f + RND), 0.5f * (1.0f + RND), 0.5f * (1.0f + RND)), 0.5f * RND));
                 }
                 else {
-                    d_list[i++] = new sphere(center, 0.2, new dielectric(1.5));
+                    d_list[i++] = new sphere(center, center2, 0.2, new dielectric(1.5));
                 }
             }
         }
@@ -137,9 +138,9 @@ __global__ void free_world(hittable **d_list, hittable **d_world, camera **d_cam
 }
 
 int main(int argc, char *argv[]) {
-    int nx = 800;
-    int ny = 500;
-    int ns = 100;
+    int nx = 712;
+    int ny = 400;
+    int ns = 50;
     int tx = 8;
     int ty = 8;
 

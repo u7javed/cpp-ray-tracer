@@ -53,7 +53,8 @@ class camera {
         __device__ ray get_ray(float s, float t, curandState *local_rand_state) {
             vec3 rd = lens_radius * random_in_unit_disk(local_rand_state);
             vec3 offset = u * rd.x() + v * rd.y();
-            return ray(origin + offset, lower_left_corner + s*horizontal + t*vertical - origin - offset);
+            float ray_time = curand_uniform(local_rand_state);
+            return ray(origin + offset, lower_left_corner + s*horizontal + t*vertical - origin - offset, ray_time);
         }
 
         __device__ vec3 random_in_unit_sphere(curandState *local_rand_state) {
