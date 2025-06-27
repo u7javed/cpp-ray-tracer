@@ -1,0 +1,64 @@
+#ifndef CAMERAH
+#define CAMERAH
+
+#include <curand_kernel.h>
+
+#include "primitives/ray.h"
+#include "objects/hittable.h"
+#include "types/color.h"
+#include "primitives/materials/material.h"
+
+#define RANDVEC3 vec3(curand_uniform(local_rand_state), curand_uniform(local_rand_state), curand_uniform(local_rand_state))
+
+class camera {
+    public:
+        point3 origin;
+        point3 lower_left_corner;
+        vec3 horizontal;
+        vec3 vertical;
+
+        __device__ camera() {
+            lower_left_corner = point3(-2.0, -1.0, -1.0);
+            horizontal = vec3(4.0, 0.0, 0.0);
+            vertical = vec3(0.0, 2.0, 0.0);
+            origin = point3(0.0, 0.0, 0.0);
+        }
+
+        __device__ ray get_ray(float u, float v) {
+            return ray(origin, lower_left_corner + u*horizontal + v*vertical - origin);
+        }
+
+        __device__ vec3 random_in_unit_sphere(curandState *local_rand_state) {
+            vec3 p;
+            do {
+                p = 2.0f * RANDVEC3 - vec3(1, 1, 1);
+            } while (p.squared_length() >= 1.0f);
+            return p;
+        }
+
+        __device__ color ray_color(const ray& r, hittable **world, curandState *local_rand_state, int max_depth) {
+            ray cur_ray = r;
+            color cur_attenuation = color(1.0, 1.0, 1.0);
+            for (int depth = 0; depth < max_depth; depth++) {
+                hit_record rec;
+                if ((*world)->hit(cur_ray, 0.001f, FLT_MAX, rec)) {
+                    ray scattered;
+                    color attenuation;
+                    if (rec.mat_ptr->scatter(cur_ray, rec, attenuation, scattered, local_rand_state)) {
+                        cur_attenuation *= attenuation;
+                        cur_ray = scattered;
+                    } else {
+                        return color(0.0, 0.0, 0.0);
+                    }
+                } else {
+                    vec3 unit_direction = unit_vector(cur_ray.direction());
+                    float t = 0.5f * (unit_direction.y() + 1.0f);
+                    color c = (1.0f - t) * color(1.0, 1.0, 1.0) + t * color(0.5, 0.7, 1.0);
+                    return cur_attenuation * c;
+                }
+            }
+            return color(0.0, 0.0, 0.0); // exceeded max depth
+        }
+};
+
+#endif
