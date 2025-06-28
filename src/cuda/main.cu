@@ -11,6 +11,8 @@
 #include "objects/bvh.h"
 #include "primitives/camera.h"
 #include "primitives/materials/material.h"
+#include "primitives/textures/texture.h"
+#include "utils/rtw_stb_image.h"
 
 #include <iostream>
 #include <time.h>
@@ -76,7 +78,7 @@ __global__ void render(
 
 #define RND (curand_uniform(&local_rand_state))
 
-__global__ void create_world(
+__global__ void create_noise_sphere(
     hittable **d_list,
     hittable **d_world,
     camera **d_camera,
@@ -86,21 +88,133 @@ __global__ void create_world(
 ) {
     if (threadIdx.x == 0 && threadIdx.y == 0) {
         curandState local_rand_state = *rand_state;
-        
-        // Create materials
-        material *mat1 = new lambertian(vec3(0.4, 0.2, 0.1));
-        material *mat2 = new metal(vec3(0.7, 0.6, 0.5), 0.0);
-        
-        // Create spheres and add to d_list
-        d_list[0] = new sphere(point3(-4, 1, 0), 1.0, mat1);
-        d_list[1] = new sphere(point3(4, 1, 0), 1.0, mat2);
-        
-        // Create BVH node from the list
-        bvh_node *bvh = new bvh_node(d_list, 0, 2, &local_rand_state);
-        
-        // Create hittable_list containing just the BVH node
-        *d_world = new hittable_list(bvh);
+        texture *pertext = new noise_texture(4.0f, &local_rand_state);
+
+        d_list[0] = new sphere(vec3(0, -1000, 0), 1000, new lambertian(pertext));
+        d_list[1] = new sphere(vec3(0, 2, 0),  2, new lambertian(pertext));
         *rand_state = local_rand_state;
+        *d_world  = new hittable_list(d_list, 2);
+
+        vec3 lookfrom(13, 2, 3);
+        vec3 lookat(0, 0, 0);
+        float dist_to_focus = (lookfrom - lookat).length();
+        float aperture = 0.1;
+        *d_camera = new camera(
+            lookfrom,
+            lookat,
+            vec3(0, 1, 0),
+            20.0,
+            float(nx)/float(ny),
+            aperture,
+            dist_to_focus
+        );
+    }
+}
+
+__global__ void create_earth(
+    hittable **d_list,
+    hittable **d_world,
+    camera **d_camera,
+    const unsigned char *earth_data,
+    int earth_width,
+    int earth_height,
+    int nx,
+    int ny,
+    curandState *rand_state
+) {
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        curandState local_rand_state = *rand_state;
+
+        texture *earth_texture = new image_texture(earth_data, earth_width, earth_height);
+        d_list[0] = new sphere(vec3(0, 0, 0), 2.0f, new lambertian(earth_texture));
+        *rand_state = local_rand_state;
+        *d_world  = new hittable_list(d_list, 1);
+
+        vec3 lookfrom(0, 0, 12);
+        vec3 lookat(0, 0, 0);
+        float dist_to_focus = (lookfrom - lookat).length();
+        float aperture = 0.1;
+        *d_camera = new camera(
+            lookfrom,
+            lookat,
+            vec3(0, 1, 0),
+            20.0,
+            float(nx)/float(ny),
+            aperture,
+            dist_to_focus
+        );
+    }
+}
+
+__global__ void create_checkered_spheres(
+    hittable **d_list,
+    hittable **d_world,
+    camera **d_camera,
+    int nx,
+    int ny,
+    curandState *rand_state
+) {
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        curandState local_rand_state = *rand_state;
+        texture *checker = new checker_texture(0.32f, color(.2, .3, .1), color(.9, .9, .9));
+        d_list[0] = new sphere(vec3(0, -10, 0), 10.0f, new lambertian(checker));
+        d_list[1] = new sphere(vec3(0, 10, 0),  10.0f, new lambertian(checker));
+        *rand_state = local_rand_state;
+        *d_world  = new hittable_list(d_list, 2);
+
+        vec3 lookfrom(13, 2, 3);
+        vec3 lookat(0, 0, 0);
+        float dist_to_focus = (lookfrom - lookat).length();
+        float aperture = 0.1;
+        *d_camera = new camera(
+            lookfrom,
+            lookat,
+            vec3(0, 1, 0),
+            20.0,
+            float(nx)/float(ny),
+            aperture,
+            dist_to_focus
+        );
+    }
+}
+
+__global__ void create_bouncing_spheres(
+    hittable **d_list,
+    hittable **d_world,
+    camera **d_camera,
+    int nx,
+    int ny,
+    curandState *rand_state
+) {
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        curandState local_rand_state = *rand_state;
+        texture *checker = new checker_texture(0.32f, color(.2, .3, .1), color(.9, .9, .9));
+        d_list[0] = new sphere(vec3(0,-1000.0,-1), 1000,
+                               new lambertian(checker));
+        int i = 1;
+        for(int a = -11; a < 11; a++) {
+            for(int b = -11; b < 11; b++) {
+                float choose_mat = RND;
+                vec3 center(a+RND,0.2,b+RND);
+                vec3 center2 = center + vec3(0, RND*0.5f, 0);
+                if(choose_mat < 0.8f) {
+                    d_list[i++] = new sphere(center, center2, 0.2f,
+                                             new lambertian(vec3(RND*RND, RND*RND, RND*RND)));
+                }
+                else if(choose_mat < 0.95f) {
+                    d_list[i++] = new sphere(center, center2, 0.2f,
+                                             new metal(vec3(0.5f*(1.0f+RND), 0.5f*(1.0f+RND), 0.5f*(1.0f+RND)), 0.5f*RND));
+                }
+                else {
+                    d_list[i++] = new sphere(center, center2, 0.2f, new dielectric(1.5));
+                }
+            }
+        }
+        d_list[i++] = new sphere(vec3(0, 1,0),  1.0, new dielectric(1.5));
+        d_list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(vec3(0.4, 0.2, 0.1)));
+        d_list[i++] = new sphere(vec3(4, 1, 0),  1.0, new metal(vec3(0.7, 0.6, 0.5), 0.0));
+        *rand_state = local_rand_state;
+        *d_world  = new hittable_list(d_list, 22*22+1+3);
 
         vec3 lookfrom(13, 2, 3);
         vec3 lookat(0, 0, 0);
@@ -118,10 +232,10 @@ __global__ void create_world(
     }
 }
 
-__global__ void free_world(hittable **d_list, hittable **d_world, camera **d_camera) {
+__global__ void free_world(hittable **d_list, hittable **d_world, camera **d_camera, int num_objects) {
     if (threadIdx.x == 0 && threadIdx.y == 0) {
         // Delete the 2 spheres we created
-        for(int i = 0; i < 2; i++) {
+        for(int i = 0; i < num_objects; i++) {
             sphere *s = (sphere *)d_list[i];
             delete s->mat_ptr;  // Delete the material
             delete s;           // Delete the sphere
@@ -168,14 +282,63 @@ int main(int argc, char *argv[]) {
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
+    int cs = 3;
+
     // make our world of hitables
     hittable **d_list;
-    checkCudaErrors(cudaMalloc((void **)&d_list, 2*sizeof(hittable *)));
+    int num_objects;
+    switch (cs) {
+        case 1:
+            num_objects = 22*22+1+3;
+            break;
+        case 2:
+            num_objects = 2;
+            break;
+        case 3:
+            num_objects = 2;
+            break;
+        case 4:
+            num_objects = 1;
+            break;
+    }
+    checkCudaErrors(cudaMalloc((void **)&d_list, num_objects*sizeof(hittable *)));
     hittable **d_world;
     checkCudaErrors(cudaMalloc((void **)&d_world, sizeof(hittable *)));
     camera **d_camera;
     checkCudaErrors(cudaMalloc((void **)&d_camera, sizeof(camera *)));
-    create_world<<<1, 1>>>(d_list, d_world, d_camera, nx, ny, d_rand_state2);
+    
+    // GPU memory for earth image (only used in case 3)
+    unsigned char *d_pixels = nullptr;
+    
+    switch (cs) {
+        case 1:
+            create_bouncing_spheres<<<1, 1>>>(d_list, d_world, d_camera, nx, ny, d_rand_state2);
+            break;
+        case 2:
+            create_checkered_spheres<<<1, 1>>>(d_list, d_world, d_camera, nx, ny, d_rand_state2);
+            break;
+        case 3:
+            create_noise_sphere<<<1, 1>>>(d_list, d_world, d_camera, nx, ny, d_rand_state2);
+            break;
+        case 4:
+            rtw_image earth_image("earthmap.jpg");
+            const unsigned char* earth_data = earth_image.flat_pixel_data();
+            
+            // Allocate GPU memory for the image data
+            int earth_width = earth_image.width();
+            int earth_height = earth_image.height();
+            
+            // Allocate the actual pixel data as a flat array
+            checkCudaErrors(cudaMalloc((void **)&d_pixels, earth_width * earth_height * 3));
+            
+            // Copy pixel data from CPU to GPU
+            checkCudaErrors(cudaMemcpy(d_pixels, earth_data, earth_width * earth_height * 3, cudaMemcpyHostToDevice));
+            
+            create_earth<<<1, 1>>>(d_list, d_world, d_camera, d_pixels, earth_width, earth_height, nx, ny, d_rand_state2);
+            
+            // Note: GPU memory will be cleaned up later
+            break;
+    }
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
@@ -219,7 +382,7 @@ int main(int argc, char *argv[]) {
 
     // clean up
     checkCudaErrors(cudaDeviceSynchronize());
-    free_world<<<1,1>>>(d_list, d_world, d_camera);
+    free_world<<<1,1>>>(d_list, d_world, d_camera, num_objects);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaFree(d_camera));
     checkCudaErrors(cudaFree(d_list));
@@ -227,6 +390,11 @@ int main(int argc, char *argv[]) {
     checkCudaErrors(cudaFree(d_rand_state));
     checkCudaErrors(cudaFree(d_rand_state2));
     checkCudaErrors(cudaFree(fb));
+    
+    // Clean up earth image GPU memory if allocated
+    if (d_pixels != nullptr) {
+        checkCudaErrors(cudaFree(d_pixels));
+    }
 
     // useful for cuda-memcheck --leak-check full
     cudaDeviceReset();

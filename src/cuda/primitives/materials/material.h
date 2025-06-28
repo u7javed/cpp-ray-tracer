@@ -1,11 +1,12 @@
 #ifndef MATERIALH
 #define MATERIALH
 
-struct hit_record;
-
 #include "primitives/ray.h"
 #include "objects/hittable.h"
 #include "types/color.h"
+#include "textures/texture.h"
+
+struct hit_record;
 
 __device__ float schlick(float cosine, float ref_idx) {
     float r0 = (1.0f - ref_idx) / (1.0f + ref_idx);
@@ -46,13 +47,15 @@ class material {
 
 class lambertian : public material {
     public:
-        color albedo;
+        texture *tex;
 
-        __device__ lambertian(const color& a) : albedo(a) {}
+        __device__ lambertian(const color& albedo): tex(new solid_color(albedo)) {}
+        __device__ lambertian(texture *t) : tex(t) {}
+
         __device__ virtual bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState *local_rand_state) const {
             vec3 target = rec.p + rec.normal + random_in_unit_sphere(local_rand_state);
             scattered = ray(rec.p, target - rec.p, r_in.time());
-            attenuation = albedo;
+            attenuation = tex->value(rec.u, rec.v, rec.p);
             return true;
         }
 };
