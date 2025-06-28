@@ -8,6 +8,7 @@
 #include "objects/hittable.h"
 #include "objects/hittable_list.h"
 #include "objects/sphere.h"
+#include "objects/bvh.h"
 #include "primitives/camera.h"
 #include "primitives/materials/material.h"
 
@@ -85,32 +86,21 @@ __global__ void create_world(
 ) {
     if (threadIdx.x == 0 && threadIdx.y == 0) {
         curandState local_rand_state = *rand_state;
-        d_list[0] = new sphere(vec3(0, -1000.0, -1), 1000,
-                               new lambertian(vec3(0.5, 0.5, 0.5)));
-        int i = 1;
-        for(int a = -11; a < 11; a++) {
-            for(int b = -11; b < 11; b++) {
-                float choose_mat = RND;
-                vec3 center(a + 0.2f * RND, 0.2f, b + 0.2f * RND);
-                vec3 center2 = center + vec3(0, RND * 0.5f, 0);
-                if(choose_mat < 0.8f) {
-                    d_list[i++] = new sphere(center, center2, 0.2,
-                                             new lambertian(vec3(RND * RND, RND * RND, RND * RND)));
-                }
-                else if(choose_mat < 0.95f) {
-                    d_list[i++] = new sphere(center, center2, 0.2,
-                                             new metal(vec3(0.5f * (1.0f + RND), 0.5f * (1.0f + RND), 0.5f * (1.0f + RND)), 0.5f * RND));
-                }
-                else {
-                    d_list[i++] = new sphere(center, center2, 0.2, new dielectric(1.5));
-                }
-            }
-        }
-        d_list[i++] = new sphere(vec3(0, 1, 0),  1.0, new dielectric(1.5));
-        d_list[i++] = new sphere(vec3(-4, 1, 0), 1.0, new lambertian(vec3(0.4, 0.2, 0.1)));
-        d_list[i++] = new sphere(vec3(4, 1, 0),  1.0, new metal(vec3(0.7, 0.6, 0.5), 0.0));
+        
+        // Create materials
+        material *mat1 = new lambertian(vec3(0.4, 0.2, 0.1));
+        material *mat2 = new metal(vec3(0.7, 0.6, 0.5), 0.0);
+        
+        // Create spheres and add to d_list
+        d_list[0] = new sphere(point3(-4, 1, 0), 1.0, mat1);
+        d_list[1] = new sphere(point3(4, 1, 0), 1.0, mat2);
+        
+        // Create BVH node from the list
+        bvh_node *bvh = new bvh_node(d_list, 0, 2, &local_rand_state);
+        
+        // Create hittable_list containing just the BVH node
+        *d_world = new hittable_list(bvh);
         *rand_state = local_rand_state;
-        *d_world  = new hittable_list(d_list, 22 * 22 + 1 + 3);
 
         vec3 lookfrom(13, 2, 3);
         vec3 lookat(0, 0, 0);
@@ -129,12 +119,25 @@ __global__ void create_world(
 }
 
 __global__ void free_world(hittable **d_list, hittable **d_world, camera **d_camera) {
-    for(int i = 0; i < 22 * 22 + 1 + 3; i++) {
-        delete ((sphere *)d_list[i])->mat_ptr;
-        delete d_list[i];
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        // Delete the 2 spheres we created
+        for(int i = 0; i < 2; i++) {
+            sphere *s = (sphere *)d_list[i];
+            delete s->mat_ptr;  // Delete the material
+            delete s;           // Delete the sphere
+        }
+        
+        // Delete the hittable_list and its contents
+        hittable_list *world = (hittable_list *)*d_world;
+        if (world->single_object != nullptr) {
+            // Delete the BVH node (this will recursively delete its children)
+            delete world->single_object;
+        }
+        delete world;
+        
+        // Delete the camera
+        delete *d_camera;
     }
-    delete *d_world;
-    delete *d_camera;
 }
 
 int main(int argc, char *argv[]) {
@@ -167,8 +170,7 @@ int main(int argc, char *argv[]) {
 
     // make our world of hitables
     hittable **d_list;
-    int num_hitables = 22 * 22 + 1 + 3;
-    checkCudaErrors(cudaMalloc((void **)&d_list, num_hitables*sizeof(hittable *)));
+    checkCudaErrors(cudaMalloc((void **)&d_list, 2*sizeof(hittable *)));
     hittable **d_world;
     checkCudaErrors(cudaMalloc((void **)&d_world, sizeof(hittable *)));
     camera **d_camera;
